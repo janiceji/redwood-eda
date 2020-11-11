@@ -1,0 +1,540 @@
+\documentclass{article}
+\usepackage{fullpage}
+\usepackage{subfig}
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+
+<<echo = F>>=
+# set the global chunk options
+knitr::opts_chunk$set(echo = F,
+               message = F,
+               warning = F,
+               )
+@
+<<>>=
+library("ggplot2")
+library("dplyr")
+library("knitr")
+library("mclust")
+sonoma_data_all <- read.csv("C:/Users/aweso/OneDrive/STAT154/Project 1/data/sonoma-data-all.csv",stringsAsFactors = F)
+sonoma_data_log <- read.csv("C:/Users/aweso/OneDrive/STAT154/Project 1/data/sonoma-data-log.csv", stringsAsFactors = F)
+sonoma_data_net <- read.csv("C:/Users/aweso/OneDrive/STAT154/Project 1/data/sonoma-data-net.csv",stringsAsFactors = F)
+
+@
+
+\section{Data Collection}
+The purpose of this study is to analyze the microclimate surrounding a 70-meter tall redwood tree by using wireless sensors to record the variations in spatial (space) and temporal (time) dynamics, considering characteristics such temperature, humidity, as well as both direct and reflective solar radiation (light). These photosynthetically active radiations, PARs for short, are ultimately able to help scientists understand important biological and environmental impacts, like the amount of energy available for photosynthetic activities and carbon balance in the forest. Things like temperature and humidity grants scientists a deeper understanding on concepts such as the flow of sap or water through the tree. In this case study, environmental changes and patterns around the redwood tree were recorded from April 27, 2004 to June 10, 2004, a total of 44 days. The early summer period was chosen for this study to maximize the variations observed. 
+The main variables of interest in this study are temperature, humidity, the amount of incident or direct radiation, and reflective or indirect radiation. The data collection process for these variables is operated by a network of sensors called macroscopes, a technology that must be protected from the weather while at the same time, exposed to track the microclimatic changes.  First, these sensor nodes are thoroughly calibrated and then scattered around the tree vertically and horizontally. Vertically, they are placed both near the base and tip, from 15 to 70 meters above the ground with a 2-meter spacing. Horizontally, they are placed 0.1 to 1.0 meters across the trunk's radius. Nodes can also be described by their direction, whether they face the east or the west. The substantial variations one observes create gradients that are observable through plotting and performing explanatory analysis. In addition, readings from the sensors are taken once every five minutes, equivalent to one epoch, and the data proceeds to be transmitted to a database. The data in sonoma-data-log.csv contains data taken from the logging itself and the separate network file is there to compensate for the loss data in the loggings in the case of unexpected failures in battery and such. Conversely, the logging file can do the same for the network. Through inspection, one notices that the data collection process differs between the two files, and these differences should be taken into consideration.
+\section{Data Cleaning}
+<<>>=
+#for ease - lets make our own crude concatenation with labels (identifying whether row is from data_log or data_net)
+sonoma_data_log$type <- "data_log"
+sonoma_data_net$type <- "data_net"
+sonoma_data_net$voltage <- as.numeric(sonoma_data_net$voltage)
+sonoma_data_crude <- merge(sonoma_data_log, sonoma_data_net, all = T)
+
+@
+\subsection{Histograms}
+Upon intial inspection of the histograms, it was clear that the presence of outliers would make analysing the distributions a difficult task. For example, consider the histograms from the sonomadatalog file.
+
+<<fig-sub1, fig.cap='Histograms', fig.subcap=c('Humidity', 'Temperaturel'), out.width='.49\\linewidth', fig.height = 4>>=
+ggplot(sonoma_data_log) + geom_histogram(aes(humidity), bins = 100)
+ggplot(sonoma_data_log) + geom_histogram(aes(humid_temp), bins = 100)
+#ggplot(sonoma_data_log) + geom_histogram(aes(hamatop), bins = 100)
+#ggplot(sonoma_data_log) + geom_histogram(aes(hamabot), bins = 100)
+@
+
+Extreme outliers mean the range that must be captured to include all datapoints is immense, and it is difficult to examine closely the relevant pertubations in each variable. This is a symptom of all variables in the sonomadatalog file.
+Now, ofcourse we could limit the domain, effectively diregarding the outliers, and allowing us to focus on the 
+relevant data. However, the question arises, where do we draw this line? Decisions based on a visual inspection 
+should be made with extreme caution.We will rely on the author's outlier detection methods as a basis for the more informed outlier removal methods we will gradually develop in this section. Indeed, once a node's battery voltage strays from a healthy 2.4 volt - 3 volt range, the data of the node is considered inaccurate. As noted by Tolle, excluding faulty nodes managed to eliminate nearly all outliers. We will adopt this appoach to attain our histograms.
+<<>>=
+sonoma_data_log_fix <- sonoma_data_log[- which(sonoma_data_log$voltage <= 2.4 | sonoma_data_log$voltage > 3), ]
+@
+
+<<fig-sub2, fig.cap='Edit Histograms', fig.subcap=c('Voltage', 'Humidity', 'Temperature', 'Incident PAR'), out.width='.23\\linewidth'>>=
+ggplot(sonoma_data_log_fix) + geom_histogram(aes(voltage), bins = 100)
+ggplot(sonoma_data_log_fix) + geom_histogram(aes(humidity), bins = 100)
+ggplot(sonoma_data_log_fix) + geom_histogram(aes(humid_temp), bins = 100)
+ggplot(sonoma_data_log_fix) + geom_histogram(aes(hamatop), bins = 100)
+#ggplot(sonoma_data_log) + geom_histogram(aes(hamabot), bins = 100)
+@
+The next problem arises when we consider consistency between the datalog and datanet files.
+
+<<fig-sub3, fig.cap='Voltage Range Inconsistency', fig.subcap=c('Voltage data_log', 'Voltage data_net'), out.width='.49\\linewidth', fig.height=4>>=
+ggplot(sonoma_data_log) + geom_histogram(aes(voltage), bins = 100)
+ggplot(sonoma_data_net) + geom_histogram(aes(voltage), bins = 100)
+@
+
+While datalog reports voltage in volts (analog signal), datanet uses a digital form. To coerce the voltage data 
+in datanet to the same range, we must convert the data from digital to analog form. However, this is not a typical 
+ADC. As can be seen in figure 2, where large values of voltage in raw datalog file correspond to small values in 
+raw datanet file. Typically, large analog values would correspond to large digital values. To fix this, we will 
+return to the original files, and compare outliers. It is reasonable to assume the prominent outlier in datalog 
+is associated with the prominent outlier in datanet.
+Proposing an inverse relationship between the two measures:
+$$data_log = \frac{a}{data_net}$$
+We calculate the constant, a, and convert the voltage measures of the troublesome data file
+<<>>=
+a <- sonoma_data_log[229456, "voltage"] * sonoma_data_net[11, "voltage"]
+sonoma_data_net$voltage <- a/sonoma_data_net$voltage
+@
+
+<<fig-sub4, fig.cap='Voltage Range Consistent', fig.subcap=c('Voltage data_log', 'Voltage data_net'), out.width='.49\\linewidth', fig.height=4>>=
+ggplot(sonoma_data_log) + geom_histogram(aes(voltage), bins = 100)
+ggplot(sonoma_data_net) + geom_histogram(aes(voltage), bins = 100)
+@
+Now we can run the same voltage based outlier rejection strategy for the datanet file, and construct histograms. It is also important to clean repeats in our concatenated data file.
+
+<<>>=
+sonoma_data_net_fix <- sonoma_data_net[- which(sonoma_data_net$voltage <= 2.4 | sonoma_data_net$voltage > 3), ]
+@
+
+<<>>=
+#concatenate our fixed dataframes
+sonoma_data_post <- merge(sonoma_data_log_fix, sonoma_data_net_fix, all = T)
+@
+<<fig-sub5, fig.cap='Combined File Histograms', fig.subcap=c('Voltage', 'Humidity', 'Temperature', 'Incident PAR'), out.width='.23\\linewidth'>>=
+ggplot(sonoma_data_post) + geom_histogram(aes(voltage, fill = type), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(humidity, fill = type), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(humid_temp, fill = type), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(hamatop, fill = type), bins = 100)
+#ggplot(sonoma_data_log) + geom_histogram(aes(hamabot), bins = 100)
+@
+
+
+\subsection{Remove Missing Data}
+There are 10059 missing values. They all appear (every day) between May 7th and May 26th. During the day, errors appear quite regularly, every 3 or so minutes. However, there are days during this time period where errors are more frequent. 24 th of May being when the most errors occurred, and the 7th of May is when the least errors occurred. 
+<<>>=
+# sonoma_data_post <- unique(sonoma_data_post[,-1])
+# kable(sapply(sonoma_data_post, function(x) sum(is.na(x))), booktabs = "T", col.names = c("Number of Missing Values")) 
+# 
+# times_log <- sonoma_data_log %>% filter(is.na(humidity)) %>% select(result_time)
+# 
+# times_log[1] <- substr(times_log[[1]],1, 10)
+# #kable(times_log, "latex", booktabs = "T")
+# 
+# kable(sapply(sonoma_data_net_fix, function(x) sum(is.na(x))))
+# times_net <- sonoma_data_net_fix %>% filter(is.na(humidity)) %>% select(result_time) # times
+# times_nethr <- times_net
+# times_net[1] <- substr(times_net[[1]],1, 10)
+# times_nethr[1] <- substr(times_nethr[[1]],12, 16)
+# times_nethr <- times_net
+# table(times_net)
+
+sonoma_data_log_fix <- na.omit(sonoma_data_log_fix)
+sonoma_data_net_fix <- na.omit(sonoma_data_net_fix)
+sonoma_data_post <- merge(sonoma_data_log_fix[, 1:11], sonoma_data_net_fix[,1:11], all = T) # keep nodide, epoch and 4 variables
+sonoma_data_post <- na.omit(sonoma_data_post)
+sonoma_data_post <- unique(sonoma_data_post[, -1]) #cleans repeats
+@
+
+\subsection{Main Table}
+Nodeid was used as a key to find Height, Direction, Distance and Tree values to incorporate inot our main table. There are 15 variables in the new dataframe
+<<>>=
+# Lets add to each seperately, and then concatenate
+mote <- read.csv("C:/Users/aweso/OneDrive/STAT154/Project 1/data/mote-location-data.txt", sep = "", header = T, stringsAsFactors = F)
+#add to main
+sonoma_data_post[,"Height"] <- NA
+sonoma_data_post[,"Direction"] <- NA
+sonoma_data_post[,"Distance"] <- NA
+sonoma_data_post[,"Tree"] <- NA
+for(i in 1:80) {
+  id <- mote[i, "ID"]
+  rows <- which(sonoma_data_post$nodeid == id)
+
+  sonoma_data_post[rows, "Height"] <- mote[i, "Height"]
+  sonoma_data_post[rows, "Direction"] <- mote[i, "Direc"]
+  sonoma_data_post[rows, "Distance"] <- mote[i, "Dist"]
+  sonoma_data_post[rows, "Tree"] <- mote[i, "Tree"]
+}
+@
+
+\subsection{Outlier Search}
+Outlier search is conducted using our main file: a refined concatenation of datanet and datalog files. THe premise for our outlier search is two part. A histogram provides an overview of the data and its distribution, revealing any overtly outlying points. A boxplot will refine the search and points lying well outside the maximum and minimum bounds will typically be considered outliers. The bounds are defined:
+$$IQR +- 1.5*IQR$$
+<<fig-sub6, fig.cap='Histograms', fig.subcap=c('Humidity', 'Humid_temp', 'Hamatop', 'Hamabot'), out.width='.22\\linewidth'>>=
+ggplot(sonoma_data_post) + geom_histogram(aes(humidity), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(humid_temp), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(hamatop), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(hamabot), bins = 100)
+
+@
+<<fig-sub7, fig.cap='Boxplots', fig.subcap=c('Humidity', 'Humid_temp', 'Hamatop', 'Hamabot'), out.width='.22\\linewidth'>>=
+boxplot(sonoma_data_post$humidity)
+boxplot(sonoma_data_post$humid_temp)
+boxplot(sonoma_data_post$hamatop)
+boxplot(sonoma_data_post$hamabot)
+@
+
+<<>>=
+#Outlier removal
+minimum <- quantile(sonoma_data_post$humidity, na.rm = T)[[2]] - 1.5*IQR(sonoma_data_post$humidity, na.rm = T)
+sonoma_data_post <- sonoma_data_post[!(sonoma_data_post$humidity < minimum),]
+
+maxlog <- quantile(sonoma_data_post$humid_temp, na.rm = T)[[4]] + 1.5*IQR(sonoma_data_post$humid_temp, na.rm = T)
+maxnet <- quantile(sonoma_data_net$humid_temp, na.rm = T)[[4]] + 1.5*IQR(sonoma_data_net$humid_temp, na.rm = T)
+sonoma_data_post <- sonoma_data_post[!(sonoma_data_post$humid_temp > maxlog),]
+
+
+ maxlog_htop <- quantile(sonoma_data_log$hamatop, na.rm = T)[[4]] + 1.5*IQR(sonoma_data_log$hamatop, na.rm = T)
+ maxnet_htop <- quantile(sonoma_data_net$hamatop, na.rm = T)[[4]] + 1.5*IQR(sonoma_data_net$hamatop, na.rm = T)
+ sonoma_data_post <- sonoma_data_post[!(sonoma_data_post$hamatop > maxlog_htop),]
+
+
+#maxlog_hbot <- quantile(sonoma_data_log$hamabot, na.rm = T)[[4]] + 3*IQR(sonoma_data_log$hamabot, na.rm = T)
+#maxnet_hbot <- quantile(sonoma_data_net$hamabot, na.rm = T)[[4]] + 3*IQR(sonoma_data_net$hamabot, na.rm = T)
+#sonoma_data_post <- sonoma_data_post[!((sonoma_data_post$type == "data_net" & sonoma_data_post$hamabot > maxnet_hbot)|(sonoma_data_post$type == "data_log" & sonoma_data_post$hamabot > maxlog_hbot)),]
+#using max values given in paper
+sonoma_data_post <- sonoma_data_post[!((sonoma_data_post$humidity > 100.2)|(sonoma_data_post$hamatop>2154)),]
+
+@
+
+It is important to critique the almost callous techniques used to eliminate outlilers in this section. While it is possible to justify removing datapoints based on deviation from mean from a purely statistical viewpoint, we must take into consideration the broader context at hand. What matters is not how far a data point is from the mean or from its predicted value. What matters is how much that one data-point influences the conclusions that will be drawn from the analysis. Outliers may be the only data telling you the true story. The author justifies removing extreme values based on the faults in the deployed sensors. We use these values as a final error check, but also to justify the deviation based outlier elimination employed
+
+\section{Data Exploration}
+\subsection{Pairwise Scatterplots}
+We know missing values appear starting on May 7th, and as noted by Tolle, most nodes seem to 'die' on May 26th. Therefore the time period we select for this analysis should be before May26th, however we must reconcile the fact that the presence of errors (missing values) even before this time mean an absence of data throughout the entire spectra of time. We choose a week where missing values appear low : from May 10th to May 17th. To find this data we must rely on the epoch data, and the fact that the ???rst reading was taken on Tuesday, April 27th 2004, at 5:10pm, and our last reading was taken on Thursday, June 10th 2004, at 2:00pm, nearly 44 days later. We will base all time sensitive analysis on the epoch readings to avoid the trouble of converting the faulty time values given in the datalog file
+<<>>=
+ini <- which(sonoma_data_post$epoch == 3.5*288)[1]
+fin <- which(sonoma_data_post$epoch == 17.5*288)[1]
+#find corresponding rows
+sonoma_time <- sonoma_data_post[ini:fin,]
+@
+<<fig-sub8, fig.cap='Pairwise Scatterplots', fig.subcap=c('Temperature vs Humidity', 'Humid_temp vs Voltage', 'Height vs Hamatop', 'Hamabot vs Voltage'), out.width='.22\\linewidth', fig.pos = 'h'>>=
+ggplot(sonoma_time) + geom_point(aes(x = humid_temp, y = humidity))
+ggplot(sonoma_time) + geom_point(aes(x = voltage, y = humid_temp))
+ggplot(sonoma_time) + geom_point(aes(x = Height, y = hamatop))
+ggplot(sonoma_time) + geom_point(aes(x = humid_temp, y = hamatop))
+@
+\emph{Temperature vs Humidity}:There appears to be a linear relationship between humidity and temperature. Specifically increases in temperature correlate with decrease in humidity. High temperatures would cause evaporation of moisture in the air , and thus we would expect to see humidity decrease. 
+\emph{Voltage vs Temperature}:A clear positive and linear correlation between temperature and voltage is evident. While it has been established that extreme voltage values produce erroneous detections of temperature, an explanation for the strong linear link between the two variables within reasonable bounds is glossed over in the paper.
+\emph{Height vs Incident PAR}:We expect to see Incident PAR as being higher at higher heights. However, from the simple scatterplot construcuted it is difficult to see any such relationship. A more precise and refined dataset must be used to search for any such relationship. For example, perhaps we should exclude all measurements made at night, or perhaps we could construct a time series; analysing how PAR travels through the height dimension over the course of a day. 
+\emph{Temperature vs Incident PAR}:We expect to see increases in temperature with increasing incident PAR. Theoretically, sunlight should go hand in hand with temperature, however,this plot does not clarify any such relationship. This can be explained by the position of nodes, both in terms of height and also direction. Detectors at higher levels, unencumbered by foliage and unobstructed are likely to exerience the full dynamism of sunlight thorughout a day. Conversely, detectors at lower levels may never detect significant Incident PAR, although they may still experience a full range of temperature as sunlight filters through the canopy heating the lower forest areas. This may explain why even small "hamatop" values are associated with the full spectrum of temperature
+
+
+\subsection{Association with Incident PAR}
+Here we will attempt to eliminate some of the obscurity of data we discussed in the previous section. By examining the factors influencing Incident PAR measurements and clarifying the nature of any relationships we find.
+<<>>=
+day <- filter(sonoma_data_post, epoch>= 3455 & epoch < 11226 )
+
+@
+<<fig-sub9, fig.cap='Incident PAR Relationships', fig.subcap=c('Incident PAR vs Humidity', 'Incident_PAR vs Humid_temp'), out.width='.49\\linewidth', fig.pos = 'h'>>=
+ggplot(day) + geom_point(aes(x = humidity, y = hamatop))
+ggplot(day) + geom_point(aes(x = humid_temp, y = hamatop, fill = Height))
+@
+A notable characteristic of both plots is that the density of points with lower humidity decreases as we move to the upper echelons of Incident PAR measurement. The opposite is true for temperature. Higher levels of Photosynthetically Active Radiation indicate larger levels of sunlight saturation, and we expect the prevelance of sunlight to have a diminishing effect on heat dependent variables such as humidity. Plots suggest that the variability of temperatures and humidity levels is reduced at locations exposed to large levels of Incident PAR, and more specifically, that these locations are limited to a higher band of temperature and humidity conditions. What is strange is that high temperatures are less common with high radiation, contrary to what we expect. This motivates our next move, to understand the behaviour of Incident PAR across the time and height dimensions. It is baseless to understand the relationships Incident PAR has with other variables if we do not also comprehend the characteristics of Incident PAR on its own.
+
+\subsection{Temporal Trends}
+<<>>=
+#sonoma_temp <- merge(sonoma_data_log_fix, sonoma_data_net_fix, all = T)
+#sonoma_temp <- na.omit(sonoma_temp)
+sonoma_data_net_fix[,"Height"] <- NA
+sonoma_data_net_fix[,"Direction"] <- NA
+sonoma_data_net_fix[,"Distance"] <- NA
+sonoma_data_net_fix[,"Tree"] <- NA
+for(i in 1:80) {
+  id <- mote[i, "ID"]
+  rows <- which(sonoma_data_net_fix$nodeid == id)
+
+  sonoma_data_net_fix[rows, "Height"] <- mote[i, "Height"]
+  sonoma_data_net_fix[rows, "Direction"] <- mote[i, "Direc"]
+  sonoma_data_net_fix[rows, "Distance"] <- mote[i, "Dist"]
+  sonoma_data_net_fix[rows, "Tree"] <- mote[i, "Tree"]
+}
+sonoma_day <- filter(na.omit(sonoma_data_net_fix))
+sonoma_day$result_time <- substr(sonoma_day$result_time,9, 10)
+
+sonoma_hour <- filter(na.omit(sonoma_data_net_fix))
+sonoma_hour$result_time <- substr(sonoma_hour$result_time,12, 13)
+
+ 
+@
+
+<<fig-sub10, fig.cap='Evolution Over Time (Days)', fig.subcap=c('Temperature', 'Humidity Adjusted'), out.width='.49\\linewidth', fig.pos = 'h', fig.height=4>>=
+
+ggplot(sonoma_day,aes(factor(result_time), humid_temp))+geom_boxplot()+  geom_point(aes(color=Height),position=position_dodge(width=0.5)) + xlab("days")
+
+ggplot(sonoma_day,aes(factor(result_time), humid_adj))+geom_boxplot()+  geom_point(aes(color=Height),position=position_dodge(width=0.5)) + xlab("days")
+
+@
+There seems to be a discontinuity in the humidity plot on day 7. Humidity plot and temperature plot appears to mirror each other, in that when we see increases in temperature, humidity decreases. Temperature ranges from around 5C to 24C. Humidity ranges from 30 to 92
+<<fig-sub11, fig.cap='Evolution Over Time(Days)', fig.subcap=c('Incident PAR', 'Reflected PAR'), out.width='.49\\linewidth', fig.pos = 'h', fig.height=4>>=
+
+ggplot(sonoma_day,aes(factor(result_time), hamatop))+geom_boxplot()+  geom_point(aes(color=Height),position=position_dodge(width=0.5)) + xlab("days")
+
+ggplot(sonoma_day,aes(factor(result_time), hamabot))+geom_boxplot()+  geom_point(aes(color=Height),position=position_dodge(width=0.5)) + xlab("days")
+@
+
+<<fig-sub12, fig.cap='Evolution Over Time (Hours)', fig.subcap=c('Temperature', 'Humidity Adjusted'), out.width='.49\\linewidth', fig.pos = 'h', fig.height=4>>=
+
+ggplot(sonoma_hour,aes(factor(result_time), humid_temp))+geom_boxplot()+  geom_point(aes(color=Height),position=position_dodge(width=0.5)) + xlab("hours")
+
+ggplot(sonoma_hour,aes(factor(result_time), humid_adj))+geom_boxplot()+  geom_point(aes(color=Height),position=position_dodge(width=0.5)) + xlab("hours")
+
+@
+
+<<fig-sub13, fig.cap='Evolution Over Time(Hours)', fig.subcap=c('Incident PAR', 'Reflected PAR'), out.width='.49\\linewidth', fig.pos = 'h', fig.height=4>>=
+
+ggplot(sonoma_hour,aes(factor(result_time), hamatop))+geom_boxplot()+  geom_point(aes(color=Height),position=position_dodge(width=0.5)) + xlab("hours")
+
+ggplot(sonoma_hour,aes(factor(result_time), hamabot))+geom_boxplot()+  geom_point(aes(color=Height),position=position_dodge(width=0.5)) + xlab("hours")
+@
+\subsection{PCA}
+<<>>=
+library("factoextra")
+sonoma.pca <- prcomp(scale(sonoma_data_post[,7:10]))
+
+@
+<<fig-sub14, fig.cap='PCA', fig.subcap=c('Screeplot, Components'), out.width='.49\\linewidth', fig.height=4>>=
+
+plot(sonoma.pca, type = "l")
+fviz_pca_var(sonoma.pca, col.var = "contrib", gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+@
+<<>>=
+print(sonoma.pca)
+@
+As we can see, the first principal component is an equal mixture of humidity, temperature and adjusted humidity; although temperature is negatively correlated with the other two (and we expect this from the earlier histograms in this paper). The second component is almost strictly influenced by Incident PAR. We have defined a useful set of axes for a low dimensional projection of the data. The usefulness derives from the fact that we can understand the datapoints in context even after projection. Movement along the horizontal axis represents a direct compromise between humidity and temperature, while the vertical axis closely approximates Incident PAR.
+
+\section{Interesting Findings}
+\subsection{Clusters on PCA}
+<<>>=
+
+dim.pca <- prcomp(scale(sonoma_data_post[, c(7:10)])) 
+data <- data.frame(dim.pca$x[,1:2])
+k <- kmeans(data, centers = 3)
+data$center <- k$cluster
+
+e <- Mclust(data, G = 3)
+data$g <- e$classification
+data$height <- sonoma_data_post$Height
+data$voltage <- sonoma_data_post$voltage
+
+data[which(data$height < 29), "Tree_Height"] <- "short"
+data[which(data$height < 47.3 & data$height >= 29), "Tree_Height"] <- "medium"
+data[which(data$height <= 66.5 & data$height >= 47.3), "Tree_Height"] <- "tall"
+
+@
+<<fig-sub15, fig.cap='Height and Data', fig.subcap=c('KMeans', 'EM Cluster'), out.width='.49\\linewidth', fig.pos = 'h', fig.height=4>>=
+ggplot(data) +geom_point(aes(x = PC1, y = PC2, col = center))
+ggplot(data) +geom_point(aes(x = PC1, y = PC2, col = g))
+
+@
+Both EM and K-Means choose the same clusters to divide the post-PCA data. This holds true over numerous iterations, and was confirmed by comparing group classification. K-Means divides data based on distance similarity arguments, while EM creates group based on variance calculations and by considering the underlying gaussian mixture model. The alginment of the two methods so closely idnicates that there is great internal cohesion within the three groups, and their separation, although not visually obvious, is significant. When we consider that the vertical PCA axis is a measure of radiation, and the horizontal axis a measure of humidity and temperature we can crudely attempt to classify overarching group strucutres within the data. Remebering the PCA components, the graphs show separation of data into these categories:High Radiation, Low Radiation-High Humidity-Low Temperature, Low Radiation-Low Humidity - High Temperature.Further analysis would perhaps expose that a variable such as voltage or node height may be influencing this consistent categorisation. 
+
+\subsection{Trends in Temperature}
+Here we use epoch as determinant for date:time to bypass the faulty measurements given in the data_log file.
+<<>>=
+#fix 3 height categories - lower
+sonoma_hour_height <- sonoma_hour
+sonoma_hour_height[which(sonoma_hour_height$Height < 29), "Tree_Height"] <- "short"
+sonoma_hour_height[which(sonoma_hour_height$Height < 47.3 & sonoma_hour_height$Height >= 29), "Tree_Height"] <- "medium"
+sonoma_hour_height[which(sonoma_hour_height$Height <= 66.5 & sonoma_hour_height$Height >= 47.3), "Tree_Height"] <- "tall"
+
+sonoma_hour_height <- sonoma_hour_height  %>% group_by(Tree_Height, epoch) %>% summarise(humid_temp = mean(humid_temp))
+
+#288 epochs in a day
+library("lubridate")
+sonoma_hour_height <- arrange(sonoma_hour_height, epoch)
+day <- sonoma_hour_height[13208:13821,]
+
+####
+fixed_time12 <- filter(sonoma_data_post, epoch%%288 == 143)
+fixed_time12$tim <- "Midday"
+
+fixed_timepm <- filter(sonoma_data_post, epoch%%288 == 215)
+fixed_timepm$tim <- "Evening"
+
+fixed_timeam <- filter(sonoma_data_post, epoch%%288 == 71)
+fixed_timeam$tim <- "Morning"
+
+fixed_time <- rbind(fixed_time12, fixed_timepm, fixed_timeam)
+fixed_time <- fixed_time  %>% group_by(tim, Height) %>% summarise(humid_temp = mean(humid_temp))
+
+@
+
+<<fig-sub16, fig.cap='Trends in Temperature', fig.subcap=c('Fixed Heights, Across A Single Day', 'Fixed Times, Across Range of Heights'), out.width='.49\\linewidth', fig.pos = 'h', fig.height=4>>=
+ggplot() + geom_line(data = filter(day, Tree_Height == "short"), aes(x = epoch, y = humid_temp, colour = Tree_Height)) + geom_line(data = filter(day, Tree_Height == "medium"), aes(x = epoch, y = humid_temp, , colour = Tree_Height)) + 
+  geom_line(data = filter(day, Tree_Height == "tall"), aes(x = epoch, y = humid_temp, , colour = Tree_Height)) + 
+  xlab("Epoch-Time") +
+  ylab("Temperature")
+
+ggplot() + geom_line(data = filter(fixed_time, tim == "Morning"), aes(x = Height, y = humid_temp, colour = tim)) + geom_line(data = filter(fixed_time, tim == "Midday"), aes(x = Height, y = humid_temp, colour = tim)) + geom_line(data = filter(fixed_time, tim == "Evening"), aes(x = Height, y = humid_temp, colour = tim)) + ylab("Temperature")
+@
+The "Fixed Heights" graph shows the evolution of temperature at 3 height categories from 5.30pm to 5.30pm the following day. While at all heights, a similar trend is repeated. The evolution of temeprature on large and small timescales is evident
+\section{Graph Critique in the paper}
+\subsection{A Better Histogram}
+The incident and reflected PAR both have long tails, so we propose that the histogram should undergo a log transformation in order to display the tail values more clearly. Ofcourse we run into the problem that the majority of Incident PAR and Reflected PAR data has value 0. We overcome this by shifting all data points by one, after converting them to the right units
+<<>>=
+sonoma_data_author <- merge(sonoma_data_log_fix[, 1:11], sonoma_data_net_fix[,1:11], all = T) # we want ot work with a dataframe similar to author: author did this prior to outlier rejection
+@
+<<fig-sub17, fig.cap='Log Transformed Incident PAR', fig.subcap=c('Log Transformed', 'Zoom in on tail'), out.width='.49\\linewidth', fig.pos = 'h', fig.height=4>>=
+sonoma_data_author$hamatop_log <- log(sonoma_data_author$hamatop/54 + 1)
+ggplot(sonoma_data_author) +
+  geom_histogram(aes(x = hamatop_log, y = (..count..)*100/sum(..count..)),
+                 bins = 50,
+                 color = "white", fill = "dark blue") +
+  xlab("log(mu.mol/m2/s)") +
+  ylab("Percentage of Readings") +
+  ggtitle("Incident PAR") #looks a little better
+
+ggplot(filter(sonoma_data_author, hamatop_log > 0)) +
+  geom_histogram(aes(x = hamatop_log, y = (..count..)*100/sum(..count..)),
+                 bins = 50,
+                 color = "white", fill = "dark blue") +
+  xlab("log(mu.mol/m2/s)") +
+  ylab("Percentage of Readings") +
+  ggtitle("Incident PAR") #looks a little better
+
+@
+
+<<fig-sub18, fig.cap='Log Transformed Reflected PAR', fig.subcap=c('Log Transformed', 'Zoom in on tail'), out.width='.49\\linewidth', fig.pos = 'h', fig.height=4>>=
+sonoma_data_author$hamabot_log <- log(sonoma_data_author$hamabot/54 + 1)
+ggplot(sonoma_data_author) +
+  geom_histogram(aes(x = hamabot_log, y = (..count..)*100/sum(..count..)),
+                 bins = 50,
+                 color = "white", fill = "dark blue") +
+  xlab("log(mu.mol/m2/s)") +
+  ylab("Percentage of Readings") +
+  ggtitle("Incident PAR") #looks a little better
+
+ggplot(filter(sonoma_data_author, hamabot_log > 0)) +
+  geom_histogram(aes(x = hamabot_log, y = (..count..)*100/sum(..count..)),
+                 bins = 50,
+                 color = "white", fill = "dark blue") +
+  xlab("log(mu.mol/m2/s)") +
+  ylab("Percentage of Readings") +
+  ggtitle("Incident PAR") #looks a little better
+
+@
+\subsection{The Problem with Plots...}
+The problem with figure 3.c) lies in the fact that the author used the overall dataset to construct boxplots, hoping to notice variation in variables with node height. The flaw in this approach is that broad averages of value-height data pairs need to be taken across the entire the entire lifespan of the experiment. Consequently, any relationships between variable and node height across smaller timescales, such as over a day, or over a week, disappear amidst the non-selectgive averages that are taken to construct the boxplots. To improve 3.c) perhaps it is better to look at time variation across a smaller time period. Alternatively, the author could select a moment during the day, say midday, and sample only "midday" data from the larger dataframe
+<<>>=
+#we will use the same height poitns they did. AUthor may have chosen these as yield was high at these levels
+heights <- c(22.9, 29.3, 31.3, 34.2, 37.7, 42.9, 44.9, 46.6, 49.4, 49.6, 49.8, 50, 52.1, 53.7, 54, 54.5, 55.2, 57.8, 59.1, 60.1, 61.1, 62, 62.9, 63.5, 64.5, 65.5, 66.5)
+
+# One day, lets choose May 11th 
+initial <- 3746 #epoch based
+final <- 3746 + 288 #288 epochs in a day
+sonoma_data_11 <- filter(sonoma_data_post, epoch<=3746 + 288, epoch >3746)
+@
+
+<<fig-sub19, fig.cap='Variations and Height Over One Day', fig.subcap=c('Temperature', 'Relative Humidity', 'Incident PAR', 'Reflected PAR'), out.width='.24\\linewidth', fig.pos = 'h', fig.height=4>>=
+ggplot(data = filter(sonoma_data_11, Height == heights), aes(x = factor(Height), y = humid_temp)) + 
+  geom_boxplot(color = "blue", outlier.colour = NA) +
+  stat_summary(fun.y = median, geom = "point", shape = 20, size = 4, color = "red", fill = "red") +
+  xlab("Node height(m)") +
+  ylab("°C") +
+  coord_flip()
+ggplot(data = filter(sonoma_data_11, Height == heights), aes(x = factor(Height), y = humidity)) + 
+  geom_boxplot(color = "blue", outlier.colour = NA) +
+  stat_summary(fun.y = median, geom = "point", shape = 20, size = 1, color = "red", fill = "red") +
+  xlab("Node height(m)") +
+  ylab("%RH") +
+  coord_flip()
+
+ggplot(data = filter(sonoma_data_11, Height == heights), aes(x = factor(Height), y = hamatop)) + 
+  geom_boxplot(color = "blue", outlier.colour = NA) +
+  stat_summary(fun.y = median, geom = "point", shape = 20, size = 1, color = "red", fill = "red") +
+  xlab("Node height(m)") +
+  ylab("??mol/m2/s") +
+  coord_flip()
+
+ggplot(data = filter(sonoma_data_11, Height == heights), aes(x = factor(Height), y = hamabot)) + 
+  geom_boxplot(color = "blue", outlier.colour = NA) +
+  stat_summary(fun.y = median, geom = "point", shape = 20, size = 1, color = "red", fill = "red") +
+  xlab("Node height(m)") +
+  ylab("??mol/m2/s") +
+  coord_flip()
+@
+Ofcourse, a problem with using data from a single day is that our data cannot be taken as being indicative of a "typical" day. While taking the whole dataset and forcing broad, spectrum-wide averages is inherently a better measure of dataset-wide patterns, the information it provides may not be useful. It oversees nuances in variable behaviour, such as how the distribution is affected by time of day. Perhaps if we want to understand typical behaviours, as the author does, we should fix the time of day, and then examine the whole dataset, in an attempt to minimise room for movement in variables (such as time) that are not the focus of the plot.
+<<>>=
+sonoma_data_author[,"Height"] <- NA
+sonoma_data_author[,"Direction"] <- NA
+sonoma_data_author[,"Distance"] <- NA
+sonoma_data_author[,"Tree"] <- NA
+for(i in 1:80) {
+  id <- mote[i, "ID"]
+  rows <- which(sonoma_data_author$nodeid == id)
+
+  sonoma_data_author[rows, "Height"] <- mote[i, "Height"]
+  sonoma_data_author[rows, "Direction"] <- mote[i, "Direc"]
+  sonoma_data_author[rows, "Distance"] <- mote[i, "Dist"]
+  sonoma_data_author[rows, "Tree"] <- mote[i, "Tree"]
+}
+# Lets Choose midday 
+midday <- 3599%%288 #epoch based
+sonoma_data_mid <- filter(sonoma_data_author, epoch%%288 == midday)
+
+@
+
+<<fig-sub20, fig.cap='Variations and Height During Midday, Over Experiment Duration', fig.subcap=c('Temperature', 'Relative Humidity', 'Incident PAR', 'Reflected PAR'), out.width='.24\\linewidth', fig.pos = 'h', fig.height=4>>=
+ggplot(data = filter(sonoma_data_mid, Height == heights), aes(x = factor(Height), y = humid_temp)) + 
+  geom_boxplot(color = "blue", outlier.colour = NA) +
+  stat_summary(fun.y = median, geom = "point", shape = 20, size = 4, color = "red", fill = "red") +
+  xlab("Node height(m)") +
+  ylab("°C") +
+  coord_flip()
+ggplot(data = filter(sonoma_data_mid, Height == heights), aes(x = factor(Height), y = humidity)) + 
+  geom_boxplot(color = "blue", outlier.colour = NA) +
+  stat_summary(fun.y = median, geom = "point", shape = 20, size = 1, color = "red", fill = "red") +
+  xlab("Node height(m)") +
+  ylab("%RH") +
+  coord_flip()
+
+ggplot(data = filter(sonoma_data_mid, Height == heights), aes(x = factor(Height), y = hamatop)) + 
+  geom_boxplot(color = "blue", outlier.colour = NA) +
+  stat_summary(fun.y = median, geom = "point", shape = 20, size = 1, color = "red", fill = "red") +
+  xlab("Node height(m)") +
+  ylab("??mol/m2/s") +
+  coord_flip()
+
+ggplot(data = filter(sonoma_data_mid, Height == heights), aes(x = factor(Height), y = hamabot)) + 
+  geom_boxplot(color = "blue", outlier.colour = NA) +
+  stat_summary(fun.y = median, geom = "point", shape = 20, size = 1, color = "red", fill = "red") +
+  xlab("Node height(m)") +
+  ylab("??mol/m2/s") +
+  coord_flip()
+@
+Clearly there is a large amount of variance between different height points for temperature and humidity. PAR plots, being largely composed of zeroes, was not informative at all. Indeed a time series where we track the temperature gradient across time may prove to be the most imformatitve. This was done earlier in the report
+
+In figure 3d) the author has shifted the mean of each variable to 0, highlighting deviation of values from their mean. The usefulness of this approach is demonstrated in the PAR plots. Almost immediately we identify that at lower forest heights, we detect below average radiation, as of course we would expect a thick canopy and foliage to obscure incident or reflected light. However, these patterns may not be the underlying structure of the distribution at all times of day. Obviously, at night time we would not expect to see this difference between the higher nodes and the lower nodes. There is no light!  We do not fully adopt the centering technique used by the author as it is unclear.
+<<>>=
+n1 <- 2867%%288
+n2 <- 2927%%288
+sonoma_data_night <- filter(sonoma_data_author, epoch%%288<=n2 | epoch%%288 >n1)
+sonoma_data_night$cent <- sonoma_data_night$hamatop - mode(sonoma_data_author$hamatop)
+sonoma_data_night <- filter(sonoma_data_night, Height == heights)
+avg <- sonoma_data_night %>% group_by(Height) %>% summarise(mean(hamatop))
+sonoma_data_night <- plyr::join(sonoma_data_night, data.frame(avg), by = "Height")
+sonoma_data_night$cent <- sonoma_data_night$hamatop - sonoma_data_night$mean.hamatop.
+@
+<<fig-sub21, fig.cap='Centered Incident PAR', fig.subcap=c('Incident PAR During The Night'), out.width='.7\\linewidth', fig.pos = 'h', fig.height=4>>=
+ggplot(data = filter(sonoma_data_night, Height == heights), aes(x = factor(Height), y = cent)) + 
+  geom_boxplot(color = "blue", outlier.colour = NA) +
+  stat_summary(fun.y = median, geom = "point", shape = 20, size = 1, color = "red", fill = "red") +
+  xlab("Node height(m)") +
+  ylab("??mol/m2/s") +
+  coord_flip()
+@
+
+
+However, we do see that the average value at night, at each height, tends to be below zero. Zero is defined as the overall mean (day and night) specific to that height. As we expected, the distribution deviates to the left, lying largely below the overall average radiation value at each node height.
+
+\subsection{Plots in Figure 4}
+It is definitely difficult to distinguish all the colours, hence all the nodes, depicted in the plots. There are several alternatives to reduce the amount of nodes while still retaining a large portion of the information in the plot. One way is to naively and randomly sample a subset of the nodes to graph. A better way is to categorise the nodes into subsections, for example, by height. See our plot in the "Trends in Temperature" subsection for an example.
+<<fig-sub22, fig.cap='Trends in Temperature with Height', fig.subcap=c('Temperature vs Time(Epoch)'), out.width='.7\\linewidth', fig.pos = 'h', fig.height=4>>=
+ggplot() + geom_line(data = filter(day, Tree_Height == "short"), aes(x = epoch, y = humid_temp, colour = Tree_Height)) + geom_line(data = filter(day, Tree_Height == "medium"), aes(x = epoch, y = humid_temp, , colour = Tree_Height)) + 
+  geom_line(data = filter(day, Tree_Height == "tall"), aes(x = epoch, y = humid_temp, , colour = Tree_Height)) + 
+  xlab("Epoch-Time") +
+  ylab("Temperature")
+@
+
+
+\subsection{Figure 7}
+While each plot presents a new perspective on the yield problem, it is questionable whether it is necessary to include some of these plots. The third plot, percentage yield vs node height, is not only difficult to read but seems redundant next to the adjacent plots. Plot 4 identifies the days where nodes at specific heights stopped working, and by visually judging the total length of the blue bars we get an idea of the total yield at every height. Ofcourse it isn't as accurate as plot 3, but an important aspect of plotting is producing a visual that is easy for a reader to understand. Plot 2 further specifies yield on every day, thus the necessity of plot 3 must be questioned.
+For each mote at each timepoint it was considered to 'report a 1' if it reports any data at all. However, constructing yield plots on this premise prevents exploration into what components of the sensor were faulty. Was it the temperature detection? Humidity? Radiation? Indeed, if we welcome this variation we may be able to identify what faults caused the differences in yeild in the network compared to the local log. Surely, it would not have been the same faults.
+
+\end{document}

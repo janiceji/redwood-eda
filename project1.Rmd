@@ -1,0 +1,114 @@
+---
+title: "Project 1"
+author: "Janice Ji"
+date: "February 27, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+library("ggplot2")
+library("dplyr")
+library("knitr")
+sonoma_data_all <- read.csv("sonoma-data-all.csv",stringsAsFactors = F)
+sonoma_data_log <- read.csv("sonoma-data-log.csv", stringsAsFactors = F)
+sonoma_data_net <- read.csv("sonoma-data-net.csv",stringsAsFactors = F)
+```
+
+```{r}
+#for ease - lets make our own crude concatenation with labels (identifying whether row is from data_log or data_net)
+sonoma_data_log$type <- "data_log"
+sonoma_data_net$type <- "data_net"
+sonoma_data_net$voltage <- as.numeric(sonoma_data_net$voltage)
+sonoma_data_crude <- merge(sonoma_data_log, sonoma_data_net, all = T)
+```
+
+
+```{r}
+ggplot(sonoma_data_log) + geom_histogram(aes(humidity), bins = 100)
+ggplot(sonoma_data_log) + geom_histogram(aes(humid_temp), bins = 100)
+#ggplot(sonoma_data_log) + geom_histogram(aes(hamatop), bins = 100)
+#ggplot(sonoma_data_log) + geom_histogram(aes(hamabot), bins = 100)
+```
+Extreme outliers mean the range that must be captured to include all datapoints is immense, and it is difficult to examine closely the relevant pertubations in each variable. This is a symptom of all variables in the sonomadatalog file.
+Now, ofcourse we could limit the domain, effectively disregarding the outliers, and allowing us to focus on the 
+relevant data. However, the question arises, where do we draw this line? Decisions based on a visual inspection 
+should be made with extreme caution. 
+
+We will rely on the author's outlier detection methods as a basis for the more informed outlier removal methods we 
+will gradually develop in this section. Indeed, once a node's battery voltage strays from a healthy 2.4 volt - 3 volt range, 
+the data of the node is considered inaccurate. As noted by Tolle, excluding faulty nodes managed to eliminate nearly all 
+outliers. We will adopt this appoach to attain our histograms.
+
+
+```{r}
+sonoma_data_log_fix <- sonoma_data_log[- which(sonoma_data_log$voltage <= 2.4 | sonoma_data_log$voltage > 3), ]
+```
+
+```{r}
+ggplot(sonoma_data_log_fix) + geom_histogram(aes(voltage), bins = 100)
+ggplot(sonoma_data_log_fix) + geom_histogram(aes(humidity), bins = 100)
+ggplot(sonoma_data_log_fix) + geom_histogram(aes(humid_temp), bins = 100)
+ggplot(sonoma_data_log_fix) + geom_histogram(aes(hamatop), bins = 100)
+#ggplot(sonoma_data_log) + geom_histogram(aes(hamabot), bins = 100)
+```
+
+```{r}
+ggplot(sonoma_data_log) + geom_histogram(aes(voltage), bins = 100)
+ggplot(sonoma_data_net) + geom_histogram(aes(voltage), bins = 100)
+```
+While datalog reports voltage in volts (analog signal), datanet uses a digital form. To coerce the voltage data 
+in datanet to the same range, we must convert the data from digital to analog form. However, this is not a typical 
+ADC. As can be seen in figure 2, where large values of voltage in raw datalog file correspond to small values in 
+raw datanet file. Typically, large analog values would correspond to large digital values. To fix this, we will 
+return to the original files, and compare outliers. It is reasonable to assume the prominent outlier in datalog 
+is associated with the prominent outlier in datanet
+
+```{r}
+a <- sonoma_data_log[229456, "voltage"] * sonoma_data_net[11, "voltage"]
+sonoma_data_net$voltage <- a/sonoma_data_net$voltage
+```
+
+
+```{r}
+ggplot(sonoma_data_log) + geom_histogram(aes(voltage), bins = 100)
+ggplot(sonoma_data_net) + geom_histogram(aes(voltage), bins = 100)
+```
+Now we can run the same voltage based outlier rejection strategy for the datanet file, and construct histograms.
+
+```{r}
+ggplot(sonoma_data_net_fix) + geom_histogram(aes(voltage), bins = 100)
+ggplot(sonoma_data_net_fix) + geom_histogram(aes(humidity), bins = 100)
+ggplot(sonoma_data_net_fix) + geom_histogram(aes(humid_temp), bins = 100)
+ggplot(sonoma_data_net_fix) + geom_histogram(aes(hamatop), bins = 100)
+#ggplot(sonoma_data_log) + geom_histogram(aes(hamabot), bins = 100)
+```
+
+```{r}
+#concatenate our fixed dataframes
+sonoma_data_post <- merge(sonoma_data_log_fix, sonoma_data_net_fix, all = T)
+```
+
+```{r}
+ggplot(sonoma_data_post) + geom_histogram(aes(voltage, fill = type), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(humidity, fill = type), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(humid_temp, fill = type), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(hamatop, fill = type), bins = 100)
+#ggplot(sonoma_data_log) + geom_histogram(aes(hamabot), bins = 100)
+```
+
+```{r}
+ggplot(sonoma_data_post) + geom_histogram(aes(voltage, fill = type), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(humidity, fill = type), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(humid_temp, fill = type), bins = 100)
+ggplot(sonoma_data_post) + geom_histogram(aes(hamatop, fill = type), bins = 100)
+#ggplot(sonoma_data_log) + geom_histogram(aes(hamabot), bins = 100)
+
+```
+
+
