@@ -42,3 +42,17 @@ result_time, epoch, nodeid, parent, voltage, depth, humidity, humid_temp, humid_
 #### Histogram
 ![histogram](https://github.com/janiceji/redwood-eda/blob/main/plots/feature-histograms.JPG)
 ![histogram2](https://github.com/janiceji/redwood-eda/blob/main/plots/feature-stacked-columns.JPG)
+
+## Principal Component Analysis
+PCA allows us to summarize our with variables called principal components.
+
+
+## Technologies Used
+#### R Packages
+- ggplot
+- dplyr
+- knitr
+- mclust
+
+## Conclusion
+- 
