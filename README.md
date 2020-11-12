@@ -39,4 +39,6 @@ result_time, epoch, nodeid, parent, voltage, depth, humidity, humid_temp, humid_
 
 ## Plots
 
-
+#### Histogram
+![histogram](https://github.com/janiceji/redwood-eda/blob/main/plots/feature-histograms.JPG)
+![histogram2](https://github.com/janiceji/redwood-eda/blob/main/plots/feature-stacked-columns.JPG)
