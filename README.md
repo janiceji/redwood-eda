@@ -45,16 +45,3 @@ The data is originally from the research paper, [A Macroscope in the Redwoods](h
 ![histogram](https://github.com/janiceji/redwood-eda/blob/main/plots/feature-histograms.JPG)
 ![histogram2](https://github.com/janiceji/redwood-eda/blob/main/plots/feature-stacked-columns.JPG)
 
-## Principal Component Analysis
-PCA allows us to summarize our with variables called principal components.
-
-
-## Technologies Used
-#### R Packages
-- ggplot
-- dplyr
-- knitr
-- mclust
-
-## Conclusion
-- 
