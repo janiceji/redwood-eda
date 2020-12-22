@@ -36,6 +36,8 @@ result_time, epoch, nodeid, parent, voltage, depth, humidity, humid_temp, humid_
 2004-05-07 18:24:59.355354,2812,138,5,223,2,96.8828,12.658,93.6018,9363.23,0
 2004-05-07 18:24:59.675467,2812,127,42,222,3,97.8044,12.3836,94.409,4702.7,0
 ```
+## Acknowledgements 
+The data is originally from the research paper, [A Macroscope in the Redwoods](https://github.com/arjunmann73/Data-Analytics-Projects), written by Tolle et al.
 
 ## Plots
 
@@ -43,16 +45,3 @@ result_time, epoch, nodeid, parent, voltage, depth, humidity, humid_temp, humid_
 ![histogram](https://github.com/janiceji/redwood-eda/blob/main/plots/feature-histograms.JPG)
 ![histogram2](https://github.com/janiceji/redwood-eda/blob/main/plots/feature-stacked-columns.JPG)
 
-## Principal Component Analysis
-PCA allows us to summarize our with variables called principal components.
-
-
-## Technologies Used
-#### R Packages
-- ggplot
-- dplyr
-- knitr
-- mclust
-
-## Conclusion
-- 
